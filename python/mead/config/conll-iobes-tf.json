@@ -16,7 +16,7 @@
         "reader_type": "default"
     },
     "model": {
-        "model_type": "default",
+        "model_type": "vae",
         "cfiltsz": [3],
         "hsz": 200,
         "wsz": 30,

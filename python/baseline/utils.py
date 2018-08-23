@@ -171,6 +171,13 @@ create_user_seq2seq_model = exporter(
         name='create_user_seq2seq_model'
     )
 )
+create_user_embed_model = exporter(
+    wrapped_partial(
+        create_user_model,
+        task_type='embed',
+        name='create_user_embed_model'
+    )
+)
 
 
 @exporter
@@ -240,6 +247,13 @@ load_user_lang_model = exporter(
         load_user_model,
         task_type='lm',
         name='load_user_lang_model'
+    )
+)
+load_user_embed_model = exporter(
+    wrapped_partial(
+        load_user_model,
+        task_type='embed',
+        name='load_user_embed_model'
     )
 )
 
