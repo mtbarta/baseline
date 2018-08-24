@@ -7,10 +7,10 @@ try:
 except ImportError:
     import pickle
 
-from .corpus_cython import construct_cooccurrence_matrix
+from baseline.pytorch.embed.corpus_cython import construct_cooccurrence_matrix
 import networkx as nx
 
-class Corpus(object):
+class GraphCorpus(object):
     """
     Class for constructing a cooccurrence matrix
     from a corpus.
@@ -63,8 +63,8 @@ class Corpus(object):
                                                     int(window),
                                                     int(ignore_missing))
 
-    def to_graph(self, sparse_matrix):
-        return nx.from_scipy_sparse_matrix(sparse_matrix)
+    def to_graph(self):
+        return nx.from_scipy_sparse_matrix(self.matrix)
 
     def save(self, filename):
 

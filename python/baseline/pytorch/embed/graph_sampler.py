@@ -1,6 +1,6 @@
 import scipy.sparse.csgraph as csg
-import utils.distortions as dis
-import graph_helpers as gh
+import baseline.pytorch.embed.distortions as dis
+import baseline.pytorch.embed.graph_helpers as gh
 
 import torch
 from torch import nn
@@ -90,4 +90,4 @@ class GraphRowSampler(torch.utils.data.Dataset):
     def __len__(self): return self.n
 
     def __repr__(self):
-return f"DATA: {self.n} points with scale {self.scale}"
+        return f"DATA: {self.n} points with scale {self.scale}"

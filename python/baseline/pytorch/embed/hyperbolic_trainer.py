@@ -25,16 +25,10 @@ class EmbeddingTrainer(Trainer):
     n_negs = kwargs.get('n_negs', 20)
     self.batch_size = kwargs.get('batchsz', 50)
 
-    order = kwargs.get('order', None)
-    rank = kwargs.get('rank', None)
+    # order = kwargs.get('order', None)
+    # rank = kwargs.get('rank', None)
     if not order or not rank:
       raise ValueError()
-
-    self.model = Hyperbolic_Emb(order, 
-                                rank, 
-                                initialize=m_init, 
-                                learn_scale=True,
-                                exponential_rescale=None)
 
     if self.gpu:
       self.model = self.model.cuda()
@@ -80,15 +74,14 @@ class EmbeddingTrainer(Trainer):
         reporting(metrics, self.train_epochs * self.batch_size, 'Train')
     return metrics
 
-def fit(model, ts, vs, es, **kwargs):
+def fit(model, ts, **kwargs):
   epochs = int(kwargs['epochs']) if 'epochs' in kwargs else 5
   model_file = get_model_file(kwargs, 'embed', 'pytorch')
 
   reporting_fns = listify(kwargs.get('reporting', basic_reporting))
 
   after_train_fn = kwargs.get('after_train_fn', None)
-  kwargs['order'] = ts.order()
-  
+
   trainer = create_trainer(EmbeddingTrainer, model, **kwargs)
 
   for epoch in range(epochs):

@@ -6,7 +6,6 @@ import os
 
 
 class LanguageModelTrainerTf(Trainer):
-
     def __init__(self, model, **kwargs):
         super(LanguageModelTrainerTf, self).__init__()
         self.model = model

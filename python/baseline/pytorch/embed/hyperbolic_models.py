@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from hyperbolic_parameter import Hyperbolic_Parameter
+from baseline.pytorch.embed.hyperbolic_parameter import Hyperbolic_Parameter
 import logging
 
 #

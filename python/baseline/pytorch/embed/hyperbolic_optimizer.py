@@ -6,7 +6,7 @@ from torch.optim.optimizer import Optimizer, required
 import torch
 import copy, logging 
 from torch.autograd import Variable
-from hyperbolic_parameter import Hyperbolic_Parameter
+from baseline.pytorch.embed.hyperbolic_parameter import Hyperbolic_Parameter
 
 
 #TODO(mleszczy): Be able to inherit from different optimizers
