@@ -11,6 +11,16 @@ import torch as t
 import time
 
 
+def cu_var(x, requires_grad=None, volatile=False):
+    if isinstance(x, list):
+        return [cu_var(u, requires_grad=requires_grad, volatile=volatile) for u in x]
+    if isinstance(x, tuple):
+        return tuple([cu_var(u, requires_grad, volatile) for u in list(x)])
+    #rg = not volatile if requires_grad is None else requires_grad
+    #vx = Variable(x, requires_grad=rg, volatile=volatile)
+    return x.cuda() if torch.cuda.is_available() else x
+    return x
+
 class EmbeddingTrainer(Trainer):
 
   def __init__(self, model, **kwargs):
@@ -19,19 +29,15 @@ class EmbeddingTrainer(Trainer):
     self.valid_epochs = 0
     self.gpu = not bool(kwargs.get('nogpu', False))
     optim = kwargs.get('optim', 'adam')
-    eta = float(kwargs.get('eta', 0.01))
+    self.eta = float(kwargs.get('eta', 0.01))
     mom = float(kwargs.get('mom', 0.9))
     self.clip = float(kwargs.get('clip', 5))
     n_negs = kwargs.get('n_negs', 20)
     self.batch_size = kwargs.get('batchsz', 50)
-
+    self.model = model
     # order = kwargs.get('order', None)
     # rank = kwargs.get('rank', None)
-    if not order or not rank:
-      raise ValueError()
 
-    if self.gpu:
-      self.model = self.model.cuda()
 
   def _get_dims(self, ts):
     np_array = ts[0]['x']
@@ -42,7 +48,7 @@ class EmbeddingTrainer(Trainer):
 
     base_opt = torch.optim.Adagrad
     self.optimizer = SVRG(self.model.parameters(),
-                          lr=eta, T=10, 
+                          lr=self.eta, T=10, 
                           data_loader=dataloader,
                           opt=base_opt)
     
@@ -53,10 +59,10 @@ class EmbeddingTrainer(Trainer):
     for data in dataloader:
       def closure(data=data, target=None):
         _data = data if target is None else (data,target)
-        c = m.loss(cu_var(_data))
+        c = self.model.loss(cu_var(_data))
         c.backward()
         return c.data[0]
-      l += opt.step(closure)
+      l += self.optimizer.step(closure)
 
       # Projection
       m.normalize()
@@ -87,6 +93,7 @@ def fit(model, ts, **kwargs):
   for epoch in range(epochs):
 
     trainer.train(ts, reporting_fns)
+    print("epoch: ", epoch)
     if after_train_fn is not None:
       after_train_fn(model)
 

@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.autograd import Variable
 from torch.utils.data import DataLoader, TensorDataset
-
+import networkx as nx
 import numpy as np, math
 import random
 
