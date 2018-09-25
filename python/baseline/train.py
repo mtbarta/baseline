@@ -26,9 +26,9 @@ class EpochReportingTrainer(Trainer):
     def __init__(self):
         super(EpochReportingTrainer, self).__init__()
 
-    def train(self, ts, reporting_fns):
+    def train(self, ts, reporting_fns, debug=False):
         start_time = time.time()
-        metrics = self._train(ts)
+        metrics = self._train(ts, debug)
         duration = time.time() - start_time
         print('Training time (%.3f sec)' % duration)
         self.train_epochs += 1
@@ -51,7 +51,7 @@ class EpochReportingTrainer(Trainer):
             reporting(metrics, epochs, phase)
         return metrics
 
-    def _train(self, ts):
+    def _train(self, ts, debug=False):
         pass
 
     def _test(self, vs, **kwargs):

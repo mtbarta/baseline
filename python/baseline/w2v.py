@@ -57,7 +57,7 @@ class PretrainedEmbeddingsModel(EmbeddingsModel):
         idx = 1
 
         word_vectors, self.dsz, known_vocab, idx = self._read_vectors(filename, idx, known_vocab, keep_unused, **kwargs)
-        self.nullv = np.zeros(self.dsz, dtype=np.float32)
+        self.nullv = np.zeros(self.dsz, dtype=np.float64)
         word_vectors = [self.nullv] + word_vectors
         self.vocab["<PAD>"] = 0
 
@@ -76,6 +76,7 @@ class PretrainedEmbeddingsModel(EmbeddingsModel):
 
     def _read_vectors(self, filename, idx, known_vocab, keep_unused, **kwargs):
         pass
+
 
 
 @exporter
@@ -103,7 +104,7 @@ class Word2VecModel(PretrainedEmbeddingsModel):
                     continue
                 if known_vocab and word in known_vocab:
                     known_vocab[word] = 0
-                vec = np.fromstring(raw, dtype=np.float32)
+                vec = np.fromstring(raw, dtype=np.float64)
                 word_vectors.append(vec)
                 self.vocab[word] = idx
                 idx += 1
@@ -116,7 +117,7 @@ class Word2VecModel(PretrainedEmbeddingsModel):
             current += 1
         vocab = m[start:current].decode('utf-8')
         raw = m[current+1:current+width+1]
-        value = np.fromstring(raw, dtype=np.float32)
+        value = np.fromstring(raw, dtype=np.float64)
         return vocab, value, current+width + 1
 
     def _read_vectors_mmap(self, filename, idx, known_vocab, keep_unused):
@@ -159,6 +160,7 @@ class GloVeModel(PretrainedEmbeddingsModel):
 
     def __init__(self, filename, known_vocab=None, unif_weight=None, keep_unused=False, normalize=False, **kwargs):
         super(GloVeModel, self).__init__(filename, known_vocab, unif_weight, keep_unused, normalize, **kwargs)
+        print("using GloVe embedding reader")
 
     def _read_vectors(self, filename, idx, known_vocab, keep_unused, **kwargs):
         use_mmap = bool(kwargs.get('use_mmap', False))
@@ -178,7 +180,9 @@ class GloVeModel(PretrainedEmbeddingsModel):
                     continue
                 if known_vocab and word in known_vocab:
                     known_vocab[word] = 0
-                vec = np.asarray(values[1:], dtype=np.float32)
+                vec = np.asarray(values[1:], dtype=np.float64)
+                if any(np.isnan(vec)):
+                    raise ValueError("float")
                 word_vectors.append(vec)
                 self.vocab[word] = idx
                 idx += 1
@@ -201,7 +205,9 @@ class GloVeModel(PretrainedEmbeddingsModel):
                         continue
                     if known_vocab and word in known_vocab:
                         known_vocab[word] = 0
-                    vec = np.asarray(values[1:], dtype=np.float32)
+                    vec = np.asarray(values[1:], dtype=np.float64)
+                    if any(np.isnan(vec)):
+                        raise ValueError("float")
                     word_vectors.append(vec)
                     self.vocab[word] = idx
                     idx += 1
@@ -232,5 +238,5 @@ class RandomInitVecModel(EmbeddingsModel):
 
         self.weights = np.random.uniform(-uw, uw, (self.vsz+1, self.dsz))
 
-        self.nullv = np.zeros(self.dsz, dtype=np.float32)
+        self.nullv = np.zeros(self.dsz, dtype=np.float64)
         self.weights[0] = self.nullv

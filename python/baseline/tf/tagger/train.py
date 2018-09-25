@@ -116,7 +116,10 @@ class TaggerTrainerTf(EpochReportingTrainer):
         span_type = kwargs.get('span_type', 'iob')
         verbose = kwargs.get('verbose', False)
         self.evaluator = TaggerEvaluatorTf(model, span_type, verbose)
-        self.global_step, self.train_op = optimizer(self.loss, **kwargs)
+        # self.global_step, self.train_op = optimizer(self.loss, **kwargs)
+
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
+        
 
     def checkpoint(self):
         self.model.saver.save(self.model.sess, "./tf-tagger-%d/tagger" % os.getpid(), global_step=self.global_step)
@@ -133,7 +136,13 @@ class TaggerTrainerTf(EpochReportingTrainer):
         pg = create_progress_bar(steps)
         for batch_dict in ts:
             feed_dict = self.model.make_input(batch_dict, do_dropout=True)
-            _, step, lossv = self.model.sess.run([self.train_op, self.global_step, self.loss], feed_dict=feed_dict)
+            
+            eucl_grads = tf.gradients(self.loss, self.model.W)
+            grads_hyp_words = eucl_grads[0].values
+            grads_hyp_words = tf.Print(grads_hyp_words, [grads_hyp_words], message="example")
+            # capped_eucl_gvs = [(tf.clip_by_norm(grad, 1.), var) for grad, var in eucl_grads]  ###### Clip gradients
+
+            _, lossv = self.model.sess.run([grads_hyp_words, self.loss], feed_dict=feed_dict)
             total_loss += lossv
             pg.update()
         pg.done()
@@ -161,6 +170,7 @@ def fit(model, ts, vs, es, **kwargs):
     model.save_using(saver)
     do_early_stopping = bool(kwargs.get('do_early_stopping', True))
     verbose = bool(kwargs.get('verbose', False))
+    debug = bool(kwargs.get("debug", False))
     if do_early_stopping:
         early_stopping_metric = kwargs.get('early_stopping_metric', 'acc')
         patience = kwargs.get('patience', epochs)
@@ -173,9 +183,12 @@ def fit(model, ts, vs, es, **kwargs):
     last_improved = 0
     for epoch in range(epochs):
 
-        trainer.train(ts, reporting_fns)
+        trainer.train(ts, reporting_fns, debug=debug)
         if after_train_fn is not None:
             after_train_fn(model)
+
+        if debug:
+            return
 
         test_metrics = trainer.test(vs, reporting_fns, phase='Valid')
 

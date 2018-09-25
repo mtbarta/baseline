@@ -5,6 +5,7 @@ from numpy import linalg as LA
 from numpy import random as np_random
 import os
 import random
+from tensorflow.python.framework import function
 
 PROJ_EPS = 1e-5
 EPS = 1e-15
@@ -29,8 +30,15 @@ def tf_tanh(x):
 def tf_dot(x, y):
     return tf.reduce_sum(x * y, axis=1, keepdims=True)
 
+
+@function.Defun(tf.float64, tf.float64)
+def norm_grad(x, dy):
+    return dy*(x/(tf.norm(x, axis = 1, keepdims=True)+1.0e-8))
+
+@function.Defun(tf.float64, grad_func=norm_grad)
 def tf_norm(x):
-    return tf.norm(x, axis = 1, keepdims=True)
+    res = tf.norm(x, axis = 1, keepdims=True)
+    return res
 
 #########################
 def tf_mob_add(u, v, c):
