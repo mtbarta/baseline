@@ -289,6 +289,8 @@ class HyperbolicRNNModel(Tagger):
         lr_words = kwargs.get("lw_words", 0.01)
         lr_ffnn = kwargs.get("lr_ffnn", 0.01)
         optimizer = kwargs.get("optimizer", "rsgd")
+        eucl_clip = kwargs.get("eucl_clip", 1.0)
+        hyp_clip = kwargs.get("hyp_clip", 1.0)
 
         print("C_val:", c_val)
 
@@ -529,7 +531,7 @@ class HyperbolicRNNModel(Tagger):
     #     ###### Update Euclidean parameters using Adam.
         optimizer_euclidean_params = tf.train.AdamOptimizer(learning_rate=1e-3)
         eucl_grads = optimizer_euclidean_params.compute_gradients(model.loss, eucl_vars)
-        capped_eucl_gvs = [(tf.clip_by_norm(grad, 1.), var) for grad, var in eucl_grads]  ###### Clip gradients
+        capped_eucl_gvs = [(tf.clip_by_norm(grad, eucl_clip), var) for grad, var in eucl_grads]  ###### Clip gradients
         all_updates_ops.append(optimizer_euclidean_params.apply_gradients(capped_eucl_gvs))
 
 
@@ -560,7 +562,7 @@ class HyperbolicRNNModel(Tagger):
                                                     idx_in_repeating_indices,
                                                     tf.shape(unique_indices)[0])
 
-            agg_gradients = tf.clip_by_norm(agg_gradients, 1.) ######## Clip gradients
+            agg_gradients = tf.clip_by_norm(agg_gradients, hyp_clip) ######## Clip gradients
             # agg_gradients = tf.Print(agg_gradients, [agg_gradients], message="agg_gradients")
 
             unique_word_emb = tf.nn.embedding_lookup(W, unique_indices)  # no repetitions here
@@ -576,7 +578,7 @@ class HyperbolicRNNModel(Tagger):
 
         if len(hyp_vars) > 0:
             hyp_grads = tf.gradients(model.loss, hyp_vars)
-            capped_hyp_grads = [tf.clip_by_norm(grad, 1.) for grad in hyp_grads]  ###### Clip gradients
+            capped_hyp_grads = [tf.clip_by_norm(grad, hyp_clip) for grad in hyp_grads]  ###### Clip gradients
 
 
             for i in range(len(hyp_vars)):
