@@ -22,10 +22,10 @@ class HyperbolicTrainer(EpochReportingTrainer):
         # self.global_step, self.train_op = optimizer(self.loss, **kwargs)
 
     def checkpoint(self):
-        self.model.saver.save(self.model.sess, "./tf-lm-%d/lm" % os.getpid())
+        self.model.saver.save(self.model.sess, "./tf-tagger-%d/lm" % os.getpid())
 
     def recover_last_checkpoint(self):
-        latest = tf.train.latest_checkpoint("./tf-lm-%d" % os.getpid())
+        latest = tf.train.latest_checkpoint("./tf-tagger-%d" % os.getpid())
         print("Reloading " + latest)
         self.model.saver.restore(self.model.sess, latest)
 
