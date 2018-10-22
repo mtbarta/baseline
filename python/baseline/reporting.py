@@ -50,6 +50,7 @@ def logging_reporting(metrics, tick, phase, tick_type=None):
     for k, v in metrics.items():
         msg[k] = v
     log.info(msg)
+    return msg
 
 g_vis = None
 g_vis_win = {}

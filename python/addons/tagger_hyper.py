@@ -291,6 +291,7 @@ class HyperbolicRNNModel(Tagger):
         optimizer = kwargs.get("optimizer", "rsgd")
         eucl_clip = kwargs.get("eucl_clip", 1.0)
         hyp_clip = kwargs.get("hyp_clip", 1.0)
+        before_mlr_dim = kwargs.get("before_mlr_dim", nc)
 
         print("C_val:", c_val)
 
@@ -380,15 +381,16 @@ class HyperbolicRNNModel(Tagger):
             rnnout, state = tf.nn.dynamic_rnn(rnnout, embedseq, sequence_length=model.lengths, dtype=tf.float64)
         # rnnout = tf.Print(rnnout, [rnnout], message="rnnout")
 
-        
+        tf.summary.histogram('RNN/rnnout', rnnout)
+        tf.summary.histogram('RNN/state', state)
 
+        # sent1_norm = util.tf_norm(state)
+        # tf.summary.scalar('RNN/sent1', tf.reduce_mean(sent1_norm))
 
-        tf.summary.scalar('RNN/word_emb1', tf.reduce_mean(tf.norm(word_embeddings, axis=2)))
-        sent1_norm = util.tf_norm(state)
-        tf.summary.scalar('RNN/sent1', tf.reduce_mean(sent1_norm))
 
         # # Converts seq to tensor, back to (B,T,W)
         hout = rnnout.get_shape()[-1]
+        print(rnnout.get_shape())
         # # Flatten from [B x T x H] - > [BT x H]
         rnnout_bt_x_h = tf.reshape(rnnout, [-1, hout])
         # rnnout_bt_x_h = tf.Print(rnnout_bt_x_h, [rnnout_bt_x_h], message="rnnout_bt_x_h")
@@ -398,9 +400,10 @@ class HyperbolicRNNModel(Tagger):
         # Define variables for the first feed-forward layer: W1 * s1 + W2 * s2 + b + bd * d(s1,s2)
         W_ff_s1 = tf.get_variable('W_ff_s1',
                                   dtype=tf.float64,
-                                  shape=[hout, nc],
+                                  shape=[hout, before_mlr_dim],  # 400, 20 -- 20 number of classes
                                   initializer= tf.contrib.layers.xavier_initializer(dtype=tf.float64))
 
+        tf.summary.histogram("W_ff_s1", W_ff_s1)
         # W_ff_s2 = tf.get_variable('W_ff_s2',
         #                           dtype=dtype,
         #                           shape=[hidden_dim, before_mlr_dim],
@@ -408,7 +411,7 @@ class HyperbolicRNNModel(Tagger):
 
         b_ff = tf.get_variable('b_ff',
                                dtype=tf.float64,
-                               shape=[1, nc],
+                               shape=[1, before_mlr_dim],
                                initializer=tf.constant_initializer(0.0))
 
         # b_ff_d = tf.get_variable('b_ff_d',
@@ -468,12 +471,14 @@ class HyperbolicRNNModel(Tagger):
         #                                       c=c_val)
 
         ffnn_s1 = util.tf_mob_mat_mul(W_ff_s1, rnnout_bt_x_h, c_val)
+        tf.summary.histogram("ffnn_s1", ffnn_s1)
+
         output_ffnn = util.tf_mob_add(ffnn_s1, b_ff, c_val)
         output_ffnn = util.tf_hyp_non_lin(output_ffnn,
                                               non_lin=ffnn_non_lin,
-                                              hyp_output = False, #(mlr_geom == 'hyp'),
+                                              hyp_output = True, #(mlr_geom == 'hyp'),
                                               c=c_val)
-
+        tf.summary.histogram("output_ffnn", output_ffnn)
         # output_ffnn = tf.Print(output_ffnn, [output_ffnn], message="output_ffnn")
 
         # Mobius dropout
@@ -484,45 +489,61 @@ class HyperbolicRNNModel(Tagger):
         #         output_ffnn = util.tf_exp_map_zero(output_ffnn, c_val)
 
 
-        model.probs = tf.reshape(output_ffnn, [-1, model.mxlen, nc])
+        seq_x_classes = tf.reshape(output_ffnn, [-1, model.mxlen, nc])
+        # ################## MLR ###################
+        # # output_ffnn is batch_size x before_mlr_dim
+
+        A_mlr = []
+        P_mlr = []
+        logits_list = []
+        dtype=tf.float64
+        words = tf.unstack(seq_x_classes, axis=1)
+        for i,word in enumerate(words):
+            l = []
+            for cl in range(nc):
+                # word should be a tensor of (?, 20)
+                # print('word', word.get_shape())
+                with tf.variable_scope('mlp', reuse=i > 0):
+                    A_mlr.append(tf.get_variable('A_mlr' + str(cl),
+                                                dtype=dtype,
+                                                shape=[20, nc],
+                                                initializer=tf.contrib.layers.xavier_initializer()))
+                    eucl_vars += [A_mlr[cl]]
+
+                    P_mlr.append(tf.get_variable('P_mlr' + str(cl),
+                                                dtype=dtype,
+                                                shape=[20, nc],
+                                                initializer=tf.constant_initializer(0.0)))
+
+                    if mlr_geom == 'eucl':
+                        eucl_vars += [P_mlr[cl]]
+                        logits_list.append(tf.reshape(util.tf_dot(-P_mlr[cl] + word, A_mlr[cl]), [-1]))
+
+                    elif mlr_geom == 'hyp':
+                        hyp_vars += [P_mlr[cl]]
+                        minus_p_plus_x = util.tf_mob_add(-P_mlr[cl], word, c_val)
+                        norm_a = util.tf_norm(A_mlr[cl])
+                        lambda_px = util.tf_lambda_x(minus_p_plus_x, c_val)
+                        # blow-- P+X == [10, 20] tensor. A_mlr is also [10,20]. px_dot_a is [10, 1]
+                        px_dot_a = util.tf_dot(minus_p_plus_x, tf.nn.l2_normalize(A_mlr[cl]))
+                        logit = 2. / np.sqrt(c_val) * norm_a * tf.asinh(np.sqrt(c_val) * px_dot_a * lambda_px)
+                        # r = tf.reshape(logit, [-1, nc])
+                        # print(r.get_shape())
+                        # print(minus_p_plus_x.get_shape())
+                        # print(A_mlr[cl].get_shape())
+                        # print(px_dot_a.get_shape())
+                        l.append(logit)
+            logits_list.append(tf.stack(l, axis=1))
+
+        probs = tf.stack(logits_list, axis=1)
+        print(probs.get_shape())
+        model.probs = tf.reshape(probs, [-1, model.mxlen, nc])
+        print(model.probs.get_shape())
+        # model.probs = seq_x_classes
         model.best = tf.argmax(model.probs, 2)
 
 
         model.loss = model.create_loss()
-
-        tf.summary.scalar('classif/unreg_loss', model.loss)
-        # ################## MLR ###################
-        # # output_ffnn is batch_size x before_mlr_dim
-
-        # A_mlr = []
-        # P_mlr = []
-        # logits_list = []
-        # for cl in range(num_classes):
-        #     A_mlr.append(tf.get_variable('A_mlr' + str(cl),
-        #                                  dtype=dtype,
-        #                                  shape=[model.mxlen, before_mlr_dim],
-        #                                  initializer=tf.contrib.layers.xavier_initializer()))
-        #     eucl_vars += [A_mlr[cl]]
-
-        #     P_mlr.append(tf.get_variable('P_mlr' + str(cl),
-        #                                  dtype=dtype,
-        #                                  shape=[model.mxlen, before_mlr_dim],
-        #                                  initializer=tf.constant_initializer(0.0)))
-
-        #     if mlr_geom == 'eucl':
-        #         eucl_vars += [P_mlr[cl]]
-        #         logits_list.append(tf.reshape(util.tf_dot(-P_mlr[cl] + output_ffnn, A_mlr[cl]), [-1]))
-
-        #     elif mlr_geom == 'hyp':
-        #         hyp_vars += [P_mlr[cl]]
-        #         minus_p_plus_x = util.tf_mob_add(-P_mlr[cl], output_ffnn, c_val)
-        #         norm_a = util.tf_norm(A_mlr[cl])
-        #         lambda_px = util.tf_lambda_x(minus_p_plus_x, c_val)
-        #         px_dot_a = util.tf_dot(minus_p_plus_x, tf.nn.l2_normalize(A_mlr[cl]))
-        #         logit = 2. / np.sqrt(c_val) * norm_a * tf.asinh(np.sqrt(c_val) * px_dot_a * lambda_px)
-        #         logits_list.append(tf.reshape(logit, [-1]))
-
-        # model.probs = tf.stack(logits_list, axis=1)
 
         # model.best = tf.argmax(model.probs, axis=1, output_type=tf.int32)
         #     ######################################## OPTIMIZATION ######################################
@@ -591,8 +612,7 @@ class HyperbolicRNNModel(Tagger):
 
         model.summary_merged = tf.summary.merge_all()
 
-        # model.test_summary_writer = tf.summary.FileWriter(
-        #     os.path.join(root_path, 'tb_28may/' + tensorboard_name + '/'))
+        model.test_summary_writer = tf.summary.FileWriter('./runs/hyper/' + str(os.getpid()))
 
 
         return model
