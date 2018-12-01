@@ -97,7 +97,7 @@ class Task(object):
                 self.primary_key = key
             vectorizer_section = feature.get('vectorizer', {'type': 'token1d'})
             vectorizer_section['mxlen'] = vectorizer_section.get('mxlen', self.config_params['preproc'].get('mxlen', -1))
-            vectorizer_section['mxwlen'] = vectorizer_section.get('mxlen', self.config_params['preproc'].get('mxwlen', -1))
+            vectorizer_section['mxwlen'] = vectorizer_section.get('mxwlen', self.config_params['preproc'].get('mxwlen', -1))
             if 'transform' in vectorizer_section:
                 vectorizer_section['transform_fn'] = eval(vectorizer_section['transform'])
             vectorizer = baseline.create_vectorizer(**vectorizer_section)
