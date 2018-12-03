@@ -122,10 +122,11 @@ class ClassifierService(Service):
     def signature_name(cls):
         return 'predict_text'
 
-    def predict(self, tokens, preproc=False):
+    def predict(self, tokens, **kwargs):
         """Take tokens and apply the internal vocab and vectorizers.  The tokens should be either a batch of text
         single utterance of type ``list``
         """
+        preproc = kwargs.get('preproc', False)
         if not preproc:
             mxlen = 0
             mxwlen = 0
