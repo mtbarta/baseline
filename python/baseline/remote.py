@@ -204,9 +204,6 @@ class RemoteModelTensorFlowGRPC(object):
 
         if self.signature == 'tag_text':
             classes = predict_response.outputs.get('classes').int_val
-            dims = predict_response.outputs.get('classes').tensor_shape.get(dim)
-            print(type(dims))
-            sys
             lengths = examples[self.lengths_key]
             result = []
             for i in range(examples[self.lengths_key].shape[0]):
