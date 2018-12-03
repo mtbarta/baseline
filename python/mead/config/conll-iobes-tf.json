@@ -41,7 +41,7 @@
         "crf": 1
     },
     "train": {
-        "epochs": 100,
+        "epochs": 2,
         "optim": "sgd",
         "eta": 0.015,
         "mom": 0.9,

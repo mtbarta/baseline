@@ -201,12 +201,12 @@ class TaggerTensorFlowExporter(TensorFlowExporter):
 
         softmax_output = tf.nn.softmax(model.probs)
         values, indices = tf.nn.top_k(softmax_output, 1)
-
         start_np = np.full((1, 1, len(labels)), -1e4, dtype=np.float32)
-        start_np[:, 0, Offsets.GO] = 0
+        start_np[:, :, labels['<GO>']] = 0
+        print(start_np)
         start = tf.constant(start_np)
+        start = tf.tile(start, [tf.shape(model.probs)[0], 1, 1])
         model.probs = tf.concat([start, model.probs], 1)
-
         ones = tf.fill(tf.shape(model.lengths), 1)
         lengths = tf.add(model.lengths, ones)
 

@@ -1,8 +1,13 @@
 import json
 import tensorflow as tf
 import os
+from baseline.utils import export, Offsets
+
+__all__ = []
+exporter = export(__all__)
 
 
+@exporter
 class PreprocessorCreator(object):
     """
     Generic class for creating using tensorflow ops
@@ -26,7 +31,7 @@ class PreprocessorCreator(object):
 
         tok2index = tf.contrib.lookup.index_table_from_tensor(
             tf.constant(vocab_list),
-            default_value=3, # This is since we have moved all <UNK>s to 3
+            default_value=Offsets.UNK, # This is since we have moved all <UNK>s to 3
             dtype=tf.string,
             name='%s2index' % feature_name
         )
@@ -87,7 +92,7 @@ class PreprocessorCreator(object):
         x = tf.contrib.framework.with_shape(shape, x)
         return x
 
-
+@exporter
 class Token1DPreprocessorCreator(PreprocessorCreator):
 
     def __init__(self, model_base_dir, pid, features, **kwargs):
