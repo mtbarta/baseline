@@ -195,6 +195,9 @@ class RemoteModelTensorFlowGRPC(object):
         :params predict_response: a PredictResponse protobuf object, 
                     as defined in tensorflow_serving proto files
         """
+        example_len = predict_response.outputs.get('classes').tensor_shape.dim[1].size
+        num_examples = predict_response.outputs.get('classes').tensor_shape.dim[0].size
+
         if self.signature == 'suggest_text':
             # s2s returns int values.
             classes = predict_response.outputs.get('classes').int_val
@@ -206,10 +209,10 @@ class RemoteModelTensorFlowGRPC(object):
             classes = predict_response.outputs.get('classes').int_val
             lengths = examples[self.lengths_key]
             result = []
-            for i in range(examples[self.lengths_key].shape[0]):
+            for i in range(num_examples):
                 length = lengths[i]
-                result.append([np.int32(x) for x in classes[length*i:length*(i+1)]])
-            
+                tmp = [np.int32(x) for x in classes[example_len*i:example_len*(i+1)][:length]]
+                result.append(tmp)
             return result
             
         if self.signature == 'predict_text':
@@ -218,8 +221,8 @@ class RemoteModelTensorFlowGRPC(object):
             result = []
             num_ex = len(examples[self.lengths_key])
             length = len(self.get_labels())
-            for i in range(num_ex):
-                d = [(c, s) for c, s in zip(classes[length*i:length*(i+1)], scores[length*i:length*(i+1)])]
+            for i in range(num_examples):
+                d = [(c, s) for c, s in zip(classes[example_len*i:example_len*(i+1)][:length], scores[length*i:length*(i+1)][:length])]
                 result.append(d)
             
             return result
