@@ -2,6 +2,7 @@ import baseline
 import os
 import shutil
 import datetime
+from mead.tf.preprocessors import Token1DPreprocessorCreator
 from tensorflow.python.framework.errors_impl import NotFoundError
 import mead.exporters
 from mead.exporters import register_exporter
@@ -44,14 +45,33 @@ class TensorFlowExporter(mead.exporters.Exporter):
     def run(self, basename, output_dir, model_version, **kwargs):
         with tf.Graph().as_default():
             config_proto = tf.ConfigProto(allow_soft_placement=True)
+            preproc = kwargs.get("preproc", False)
             with tf.Session(config=config_proto) as sess:
-                sig_input, sig_output, sig_name, assets = self._create_rpc_call(sess, basename)
-                # output_path = os.path.join(tf.compat.as_bytes(output_dir), tf.compat.as_bytes(str(model_version)))
+                inputs, embeddings = self._create_inputs(sess, basename, preproc)
+                # Read the labels
+                labels = read_json(basename + '.labels')
+                model, classes, values = self._create_model(sess, 
+                                                            basename, 
+                                                            labels, 
+                                                            embeddings)
+
+                # Restore the checkpoint
+                self._restore_checkpoint(sess, basename)
+
+                sig_input, sig_output, sig_name = self._create_rpc_call(model,
+                                                                                inputs,
+                                                                                classes, 
+                                                                                values)
+                assets = create_assets(basename, sig_input, sig_output, sig_name, model.lengths_key)
                 output_path = os.path.join(output_dir, str(model_version))
                 print('Exporting trained model to %s' % output_path)
 
                 try:
-                    builder = self._create_saved_model_builder(sess, output_path, sig_input, sig_output, sig_name)
+                    builder = self._create_saved_model_builder(sess, 
+                                                               output_path, 
+                                                               sig_input, 
+                                                               sig_output, 
+                                                               sig_name)
                     create_bundle(builder, output_path, basename, assets)
                     print('Successfully exported model to %s' % output_dir)
                 except AssertionError as e:
@@ -100,6 +120,13 @@ class TensorFlowExporter(mead.exporters.Exporter):
 
         return builder
 
+    def _create_embedding(self, basename, key, class_name):
+        md = read_json('{}-{}-md.json'.format(basename, key))
+        embed_args = dict({'vsz': md['vsz'], 'dsz': md['dsz']})
+        Constructor = eval(class_name)
+
+        return Constructor(key, **embed_args)
+
     def _create_rpc_call(self, sess, basename):
         pass
 
@@ -111,10 +138,7 @@ class ClassifyTensorFlowExporter(TensorFlowExporter):
     def __init__(self, task):
         super(ClassifyTensorFlowExporter, self).__init__(task)
 
-    def _create_model(self, sess, basename):
-        # Read the labels
-        labels = read_json(basename + '.labels')
-
+    def _create_inputs(self, sess, basename, preproc=False):
         # Get the parameters from MEAD
         model_params = self.task.config_params["model"]
         model_params["sess"] = sess
@@ -122,14 +146,43 @@ class ClassifyTensorFlowExporter(TensorFlowExporter):
         # Read the state file
         state = read_json(basename + '.state')
 
+        predict_tensors = {}
+        embeddings = {}
+        
         # Re-create the embeddings sub-graph
-        embeddings = dict()
         for key, class_name in state['embeddings'].items():
-            md = read_json('{}-{}-md.json'.format(basename, key))
-            embed_args = dict({'vsz': md['vsz'], 'dsz': md['dsz']})
-            Constructor = eval(class_name)
-            embeddings[key] = Constructor(key, **embed_args)
+            embeddings[key] = self._create_embedding(basename, key, class_name)
+            if not preproc:
+                try:
+                    predict_tensors[k] = tf.saved_model.utils.build_tensor_info(v.x)
+                except:
+                    raise Exception('Unknown attribute in signature: {}'.format(v))
+        
+        # slightly confusing, but if we are preprocessing, we need to init the 
+        # preprocessor. Therefore, we are using a new code block rather than
+        # doing this in the above code block.
+        if preproc:
+            model_base_dir = os.path.split(basename)[0]
+            pid = basename.split("-")[-1]
+            features = state['embeddings'].keys()
+            preprocessor = Token1DPreprocessorCreator(model_base_dir, pid, features)
+            tf_example, preprocessed = preprocessor.run()
+            # modify the model parameters via side effect
+            for feature in preprocessed:
+                model_params[feature] = preprocessed[feature]
 
+                try:
+                    predict_tensors[feature] = tf.saved_model.utils.build_tensor_info(tf_example[feature])
+                except:
+                    raise Exception('Unknown attribute in signature: {}'.format(v))
+
+        return predict_tensors, embeddings
+        
+    def _create_model(self, sess, basename, labels, embeddings):
+        model_params = self.task.config_params["model"]
+
+        # Read the state file
+        state = read_json(basename + '.state')
         # Instantiate a graph
         model = baseline.model.create_model_for(self.task.task_name(), embeddings, labels, **model_params)
 
@@ -144,26 +197,14 @@ class ClassifyTensorFlowExporter(TensorFlowExporter):
         table = tf.contrib.lookup.index_to_string_table_from_tensor(class_tensor)
         classes = table.lookup(tf.to_int64(indices))
 
-        # Restore the checkpoint
-        self._restore_checkpoint(sess, basename)
         return model, classes, values
 
-    def _create_rpc_call(self, sess, basename):
-        model, classes, values = self._create_model(sess, basename)
-
-        predict_tensors = {}
-
-        for k, v in model.embeddings.items():
-            try:
-                predict_tensors[k] = tf.saved_model.utils.build_tensor_info(v.x)
-            except:
-                raise Exception('Unknown attribute in signature: {}'.format(v))
-
-        sig_input = predict_tensors
+    def _create_rpc_call(self, model, inputs, classes, values):
+        sig_input = inputs
         sig_output = SignatureOutput(classes, values)
         sig_name = 'predict_text'
-        assets = create_assets(basename, sig_input, sig_output, sig_name, model.lengths_key)
-        return sig_input, sig_output, sig_name, assets
+        
+        return sig_input, sig_output, sig_name
 
 
 @exporter
@@ -173,8 +214,11 @@ class TaggerTensorFlowExporter(TensorFlowExporter):
     def __init__(self, task):
         super(TaggerTensorFlowExporter, self).__init__(task)
 
-    def _create_model(self, sess, basename):
-        labels = read_json(basename + '.labels')
+    def _create_inputs(self, sess, basename, preproc=False):
+        #TODO: use this for splitting on preproc
+        pass
+
+    def _create_model(self, sess, basename, labels, embeddings):
         model_params = self.task.config_params["model"]
         model_params["sess"] = sess
 
@@ -186,10 +230,7 @@ class TaggerTensorFlowExporter(TensorFlowExporter):
         # Re-create the embeddings sub-graph
         embeddings = dict()
         for key, class_name in state['embeddings'].items():
-            md = read_json('{}-{}-md.json'.format(basename, key))
-            embed_args = dict({'vsz': md['vsz'], 'dsz': md['dsz']})
-            Constructor = eval(class_name)
-            embeddings[key] = Constructor(key, **embed_args)
+            embeddings[key] = self._create_embedding(basename, key, class_name)
 
         model = baseline.model.create_model_for(self.task.task_name(), embeddings, labels, **model_params)
 
@@ -225,9 +266,12 @@ class TaggerTensorFlowExporter(TensorFlowExporter):
 
         return model, indices, values
 
-    def _create_rpc_call(self, sess, basename):
-        model, classes, values = self._create_model(sess, basename)
+    def _create_rpc_call(self, model, inputs, classes, values):
+        """TODO(MB): inputs should be passed to this method instead of assuming
+        model.embeddings. This is to help support preprocessing. 
 
+        see the classifier exporter
+        """
         predict_tensors = {}
         predict_tensors[model.lengths_key] = tf.saved_model.utils.build_tensor_info(model.lengths)
 
@@ -271,6 +315,9 @@ class Seq2SeqTensorFlowExporter(TensorFlowExporter):
     def __init__(self, task):
         super(Seq2SeqTensorFlowExporter, self).__init__(task)
 
+    def _create_inputs(self, sess, basename, preproc=False):
+        pass
+
     def init_embeddings(self, embeddings_map, basename):
         embeddings = dict()
         for key, class_name in embeddings_map:
@@ -281,7 +328,7 @@ class Seq2SeqTensorFlowExporter(TensorFlowExporter):
         
         return embeddings
 
-    def _create_model(self, sess, basename):
+    def _create_model(self, sess, basename, labels, embeddings):
         model_params = self.task.config_params["model"]
         model_params["sess"] = sess
         model_params['predict'] = True
@@ -315,9 +362,12 @@ class Seq2SeqTensorFlowExporter(TensorFlowExporter):
 
         return model, classes, None
 
-    def _create_rpc_call(self, sess, basename):
-        model, classes, values = self._create_model(sess, basename)
+    def _create_rpc_call(self, model, inputs, classes, values):
+        """TODO(MB): inputs should be passed to this method instead of assuming
+        model.embeddings. This is to help support preprocessing. 
 
+        see the classifier exporter
+        """
         predict_tensors = {}
         predict_tensors[self.length_key] = tf.saved_model.utils.build_tensor_info(model.src_len)
 
@@ -345,7 +395,7 @@ def create_bundle(builder, output_path, basename, assets=None):
     builder.save()
 
     model_name = basename.split("/")[-1]
-    directory = os.path.join('./', *basename.split("/")[:-1])
+    directory = os.path.join('/', *basename.split("/")[:-1])
 
     save_to_bundle(output_path, directory, assets)
 
