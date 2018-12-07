@@ -48,6 +48,8 @@ class TensorFlowExporter(mead.exporters.Exporter):
             preproc = kwargs.get("preproc", False)
             with tf.Session(config=config_proto) as sess:
                 embeddings = self._create_embeddings(sess, basename)
+                if preproc:
+                    tf_example = self._adjust_params_for_tf_example(sess, basename)
                 # Read the labels
                 labels = read_json(basename + '.labels')
                 model, classes, values = self._create_model(sess, 
@@ -55,14 +57,20 @@ class TensorFlowExporter(mead.exporters.Exporter):
                                                             labels, 
                                                             embeddings)
 
-                inputs = self._create_inputs(sess, basename, model.embeddings, preproc)
+                tensors = None
+                if preproc:
+                    tensors = {k: tf_example[k] for k,_ in embeddings.items()}
+                else:
+                    tensors = {k: v.x for k,v in embeddings.items()}
+                    
+                inputs = self._create_inputs(sess, basename, tensors)
                 # Restore the checkpoint
                 self._restore_checkpoint(sess, basename)
 
                 sig_input, sig_output, sig_name = self._create_rpc_call(model,
-                                                                                inputs,
-                                                                                classes, 
-                                                                                values)
+                                                                        inputs,
+                                                                        classes, 
+                                                                        values)
                 assets = create_assets(basename, sig_input, sig_output, sig_name, model.lengths_key)
                 output_path = os.path.join(output_dir, str(model_version))
                 print('Exporting trained model to %s' % output_path)
@@ -147,7 +155,6 @@ class ClassifyTensorFlowExporter(TensorFlowExporter):
         # Read the state file
         state = read_json(basename + '.state')
 
-        predict_tensors = {}
         embeddings = {}
         
         # Re-create the embeddings sub-graph
@@ -156,37 +163,35 @@ class ClassifyTensorFlowExporter(TensorFlowExporter):
         
         return embeddings
 
-    def _create_inputs(self, sess, basename, embeddings, preproc=False):
+    def _adjust_params_for_tf_example(self, sess, basename):
+        model_params = self.task.config_params["model"]
+        model_base_dir = os.path.split(basename)[0]
+        pid = basename.split("-")[-1]
+
+        state = read_json(basename + '.state')
+        features = state['embeddings'].keys()
+        preprocessor = Token1DPreprocessorCreator(model_base_dir, pid, features)
+        tf_example, preprocessed = preprocessor.run()
+        # modify the model parameters via side effect
+        for feature in preprocessed:
+            model_params[feature] = preprocessed[feature]
+
+        return tf_example
+
+    def _create_inputs(self, sess, basename, tensors):
         predict_tensors = {}
 
         # Read the state file
         state = read_json(basename + '.state')
+        features = state['embeddings'].keys()
         model_params = self.task.config_params["model"]
 
-        if not preproc:
-                try:
-                    predict_tensors[k] = tf.saved_model.utils.build_tensor_info(embeddings[key].x)
-                except:
-                    raise Exception('Unknown attribute in signature: {}'.format(key))
-        
-        # slightly confusing, but if we are preprocessing, we need to init the 
-        # preprocessor. Therefore, we are using a new code block rather than
-        # doing this in the above code block.
-        if preproc:
-            model_base_dir = os.path.split(basename)[0]
-            pid = basename.split("-")[-1]
-            features = state['embeddings'].keys()
-            preprocessor = Token1DPreprocessorCreator(model_base_dir, pid, features)
-            tf_example, preprocessed = preprocessor.run()
-            # modify the model parameters via side effect
-            for feature in preprocessed:
-                model_params[feature] = preprocessed[feature]
-
-                try:
-                    predict_tensors[feature] = tf.saved_model.utils.build_tensor_info(tf_example[feature])
-                except:
-                    raise Exception('Unknown attribute in signature: {}'.format(v))
-
+        for feature in features:
+            try:
+                predict_tensors[feature] = tf.saved_model.utils.build_tensor_info(tensors[feature])
+            except:
+                raise Exception('Unknown attribute in signature: {}'.format(key))
+            
         return predict_tensors
         
     def _create_model(self, sess, basename, labels, embeddings):
