@@ -47,7 +47,7 @@ class TensorFlowExporter(mead.exporters.Exporter):
             config_proto = tf.ConfigProto(allow_soft_placement=True)
             preproc = kwargs.get("preproc", False)
             with tf.Session(config=config_proto) as sess:
-                inputs, embeddings = self._create_inputs(sess, basename, preproc)
+                embeddings = self._create_embeddings(sess, basename)
                 # Read the labels
                 labels = read_json(basename + '.labels')
                 model, classes, values = self._create_model(sess, 
@@ -55,6 +55,7 @@ class TensorFlowExporter(mead.exporters.Exporter):
                                                             labels, 
                                                             embeddings)
 
+                inputs = self._create_inputs(sess, basename, model.embeddings, preproc)
                 # Restore the checkpoint
                 self._restore_checkpoint(sess, basename)
 
@@ -138,7 +139,7 @@ class ClassifyTensorFlowExporter(TensorFlowExporter):
     def __init__(self, task):
         super(ClassifyTensorFlowExporter, self).__init__(task)
 
-    def _create_inputs(self, sess, basename, preproc=False):
+    def _create_embeddings(self, sess, basename):
         # Get the parameters from MEAD
         model_params = self.task.config_params["model"]
         model_params["sess"] = sess
@@ -152,11 +153,21 @@ class ClassifyTensorFlowExporter(TensorFlowExporter):
         # Re-create the embeddings sub-graph
         for key, class_name in state['embeddings'].items():
             embeddings[key] = self._create_embedding(basename, key, class_name)
-            if not preproc:
+        
+        return embeddings
+
+    def _create_inputs(self, sess, basename, embeddings, preproc=False):
+        predict_tensors = {}
+
+        # Read the state file
+        state = read_json(basename + '.state')
+        model_params = self.task.config_params["model"]
+
+        if not preproc:
                 try:
-                    predict_tensors[k] = tf.saved_model.utils.build_tensor_info(v.x)
+                    predict_tensors[k] = tf.saved_model.utils.build_tensor_info(embeddings[key].x)
                 except:
-                    raise Exception('Unknown attribute in signature: {}'.format(v))
+                    raise Exception('Unknown attribute in signature: {}'.format(key))
         
         # slightly confusing, but if we are preprocessing, we need to init the 
         # preprocessor. Therefore, we are using a new code block rather than
@@ -176,7 +187,7 @@ class ClassifyTensorFlowExporter(TensorFlowExporter):
                 except:
                     raise Exception('Unknown attribute in signature: {}'.format(v))
 
-        return predict_tensors, embeddings
+        return predict_tensors
         
     def _create_model(self, sess, basename, labels, embeddings):
         model_params = self.task.config_params["model"]
@@ -214,8 +225,11 @@ class TaggerTensorFlowExporter(TensorFlowExporter):
     def __init__(self, task):
         super(TaggerTensorFlowExporter, self).__init__(task)
 
-    def _create_inputs(self, sess, basename, preproc=False):
+    def _create_inputs(self, sess, basename, embeddings, preproc=False):
         #TODO: use this for splitting on preproc
+        pass
+
+    def _create_embeddings(self, sess, basename):
         pass
 
     def _create_model(self, sess, basename, labels, embeddings):
@@ -315,7 +329,11 @@ class Seq2SeqTensorFlowExporter(TensorFlowExporter):
     def __init__(self, task):
         super(Seq2SeqTensorFlowExporter, self).__init__(task)
 
-    def _create_inputs(self, sess, basename, preproc=False):
+    def _create_inputs(self, sess, basename, embeddings, preproc=False):
+        #TODO: use this for splitting on preproc
+        pass
+
+    def _create_embeddings(self, sess, basename):
         pass
 
     def init_embeddings(self, embeddings_map, basename):

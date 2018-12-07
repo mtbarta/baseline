@@ -19,11 +19,7 @@ class PreprocessorCreator(object):
         with open(vocab_file, 'r') as f:
             vocab = json.load(f)
 
-        # Make a vocab list
-        vocab_list = [''] * (len(vocab) + 1)
-
-        for v, i in vocab.items():
-            vocab_list[i] = v
+        vocab_list = sorted(vocab.keys(), key= lambda k : vocab[k])
 
         tok2index = tf.contrib.lookup.index_table_from_tensor(
             tf.constant(vocab_list),
